@@ -93,3 +93,19 @@ function updateScore(points) {
     let currentScore = parseInt(scoreElement.innerText);
     scoreElement.innerText = currentScore + points;
 }
+// 클릭(터치) 시 공 생성
+window.addEventListener('mousedown', (e) => {
+    const rect = render.canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    
+    // 너무 위를 클릭하면 공이 안 나오게 하거나, 고정된 높이(50px)에서 투하
+    const type = ballTypes[Math.floor(Math.random() * 2)]; 
+    
+    const ball = Bodies.circle(x, 50, type.radius, {
+        label: type.label.toString(),
+        restitution: 0.4,
+        render: { fillStyle: type.color }
+    });
+    
+    Composite.add(engine.world, ball);
+});
