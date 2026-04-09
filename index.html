@@ -3,16 +3,170 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Mungchi Merge Ball</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Mungchi Merge Game</title>
+    <style>
+        /* CSS 스타일 */
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #fdf6e3;
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #score-container {
+            position: absolute;
+            top: 40px;
+            text-align: center;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px 30px;
+            border-radius: 50px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            z-index: 10;
+        }
+
+        #label { font-size: 12px; color: #888; letter-spacing: 2px; }
+        #score { font-size: 32px; font-weight: bold; color: #333; display: block; }
+        
+        canvas {
+            box-shadow: 0 10px 50px rgba(0,0,0,0.2);
+            background: #fff;
+        }
+    </style>
 </head>
 <body>
+
     <div id="score-container">
         <span id="label">SCORE</span>
         <span id="score">0</span>
     </div>
-    
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
-    <script src="script.js"></script>
+    
+    <script>
+        const { Engine, Render, Runner, Bodies, Composite, Events, Body } = Matter;
+
+        // 1. 설정
+        const engine = Engine.create();
+        const width = Math.min(window.innerWidth, 450);
+        const height = window.innerHeight;
+        const deadline = 120; // 게임 오버 라인 높이
+
+        const render = Render.create({
+            element: document.body,
+            engine: engine,
+            options: {
+                width: width,
+                height: height,
+                wireframes: false,
+                background: '#ffffff'
+            }
+        });
+
+        Render.run(render);
+        const runner = Runner.create();
+        Runner.run(runner, engine);
+
+        // 2. 바닥과 벽
+        const ground = Bodies.rectangle(width / 2, height + 25, width, 60, { isStatic: true, render: { fillStyle: '#333' } });
+        const leftWall = Bodies.rectangle(-25, height / 2, 60, height, { isStatic: true });
+        const rightWall = Bodies.rectangle(width + 25, height / 2, 60, height, { isStatic: true });
+        Composite.add(engine.world, [ground, leftWall, rightWall]);
+
+        // 3. 공 종류 데이터
+        const ballTypes = [
+            { radius: 15, label: 2, color: '#FFB7B2' },
+            { radius: 25, label: 4, color: '#FFDAC1' },
+            { radius: 35, label: 8, color: '#E2F0CB' },
+            { radius: 45, label: 16, color: '#B5EAD7' },
+            { radius: 55, label: 32, color: '#C7CEEA' },
+            { radius: 70, label: 64, color: '#F8BBD0' },
+            { radius: 90, label: 128, color: '#FF9AA2' }
+        ];
+
+        // 4. 공 생성 (클릭/터치)
+        window.addEventListener('mousedown', (e) => {
+            const rect = render.canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            
+            // 공 등급 결정 (처음엔 아주 작은 것만)
+            const type = ballTypes[Math.floor(Math.random() * 2)]; 
+            
+            const ball = Bodies.circle(x, 50, type.radius, {
+                label: type.label.toString(),
+                restitution: 0.3,
+                friction: 0.1,
+                render: { fillStyle: type.color }
+            });
+            
+            Composite.add(engine.world, ball);
+        });
+
+        // 5. 충돌 및 합치기(Merge) 로직
+        Events.on(engine, 'collisionStart', (event) => {
+            event.pairs.forEach((pair) => {
+                const { bodyA, bodyB } = pair;
+
+                if (bodyA.label === bodyB.label && !bodyA.isStatic && !bodyB.isStatic) {
+                    const currentLabel = parseInt(bodyA.label);
+                    const nextTypeIndex = ballTypes.findIndex(t => t.label === currentLabel) + 1;
+
+                    if (nextTypeIndex < ballTypes.length) {
+                        const nextType = ballTypes[nextTypeIndex];
+                        const newX = (bodyA.position.x + bodyB.position.x) / 2;
+                        const newY = (bodyA.position.y + bodyB.position.y) / 2;
+
+                        Composite.remove(engine.world, [bodyA, bodyB]);
+
+                        const newBall = Bodies.circle(newX, newY, nextType.radius, {
+                            label: nextType.label.toString(),
+                            render: { fillStyle: nextType.color }
+                        });
+                        
+                        Composite.add(engine.world, newBall);
+                        updateScore(currentLabel * 2);
+                    }
+                }
+            });
+        });
+
+        // 6. 게임 오버 체크
+        Events.on(engine, 'afterUpdate', () => {
+            Composite.allBodies(engine.world).forEach(body => {
+                // 생성된 지 최소 1초 이상 된 공이 데드라인 위로 올라왔을 때만 체크
+                if (!body.isStatic && body.position.y < deadline && body.position.y > 0) {
+                    if (body.collisionFilter.group === 0) { // 생성 직후 투하 중일 땐 무시하기 위함
+                        // 간단한 시간차 판정을 위해 속도가 거의 없을 때 체크
+                        if (Math.abs(body.velocity.y) < 0.1) {
+                            alert("게임 오버! 점수: " + document.getElementById('score').innerText);
+                            location.reload();
+                        }
+                    }
+                }
+            });
+        });
+
+        // 7. 데드라인 시각화 (빨간 점선)
+        Events.on(render, 'afterRender', () => {
+            const context = render.context;
+            context.beginPath();
+            context.setLineDash([5, 5]);
+            context.moveTo(0, deadline);
+            context.lineTo(width, deadline);
+            context.strokeStyle = '#FF4444';
+            context.lineWidth = 2;
+            context.stroke();
+            context.setLineDash([]);
+        });
+
+        function updateScore(points) {
+            const scoreElement = document.getElementById('score');
+            scoreElement.innerText = parseInt(scoreElement.innerText) + points;
+        }
+    </script>
 </body>
 </html>
